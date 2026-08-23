@@ -31,7 +31,21 @@ while (running)
             {
                 string path = ask(true, "Enter path to either a serialized XML or the JSON file to translate");
                 if (path.EndsWith(".xml")) entries = importFile(path);
-                else if (path.EndsWith(".json")) parseData(JsonObject.Parse(File.ReadAllText(path)));
+                else if (path.EndsWith(".json"))
+                {
+                    entries = parseData(JsonObject.Parse(File.ReadAllText(path)));
+                    wl("");
+                    path = ask(true, "Enter path to the original JSON to cross-reference for translation progress, or leave empty");
+                    if (path.EndsWith(".json"))
+                    {
+                        var original = parseData(JsonObject.Parse(File.ReadAllText(path)));
+                        foreach (var entr in entries)
+                        {
+                            var match = original.Find(x => x._path == entr._path);
+                            if (match != null) entr.Original = match.Original;
+                        }
+                    }
+                }
                 state = screenStates.translating;
             }
             break;
@@ -40,9 +54,24 @@ while (running)
             {
                 string path = ask(true, "Enter path to a serialized XML to import and merge");
                 if (path.EndsWith(".xml")) imported = importFile(path);
+                else if (path.EndsWith(".json"))
+                {
+                    imported = parseData(JsonObject.Parse(File.ReadAllText(path)));
+                    wl("");
+                    path = ask(true, "Enter path to the original JSON to cross-reference");
+                    if (path.EndsWith(".json"))
+                    {
+                        var original = parseData(JsonObject.Parse(File.ReadAllText(path)));
+                        foreach (var entr in imported)
+                        {
+                            var match = original.Find(x => x._path == entr._path);
+                            if (match != null) entr.Original = match.Original;
+                        }
+                    }
+                }
                 else
                 {
-                    wl("Invalid file type. Only XML files are supported for import.");
+                    wl("Invalid file type.");
                     break;
                 }
                 state = screenStates.merge;
@@ -197,9 +226,10 @@ void clear()
     goTo(0, 3);
 }
 
-void parseData(JsonNode? node, int indent = 0, string path = "")
+List<translationEntry> parseData(JsonNode? node, int indent = 0, string path = "")
 {
-    if (node == null) return;
+    var parsed = new List<translationEntry>();
+    if (node == null) return null;
     if (node is JsonObject obj)
     {
         foreach (var kvp in obj)
@@ -224,12 +254,13 @@ void parseData(JsonNode? node, int indent = 0, string path = "")
     }
     else if (node is JsonValue value)
     {
-        entries.Add(new translationEntry
+        parsed.Add(new translationEntry
         {
             _path = path,
             Original = value.ToString()
         });
     }
+    return parsed;
 }
 
 void exportDataBackToJSON(List<translationEntry> toExport, string path2file)
