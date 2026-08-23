@@ -1,15 +1,20 @@
 using System.Diagnostics;
 using System.Drawing;
+using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Xml;
 using System.Xml.Serialization;
+Console.InputEncoding = Encoding.Unicode;
+Console.OutputEncoding = Encoding.Unicode;
 
 #region vars
 List<translationEntry> entries = new List<translationEntry>();
+List<translationEntry> imported = new List<translationEntry>();
 bool running = true;
 screenStates state = screenStates.mainMenu;
+var rnd = new Random();
 #endregion
 
 wl("scav_translation_tool v0.1");
@@ -31,21 +36,110 @@ while (running)
             }
             break;
 
-        case screenStates.translating:
-            if (!entries.Where(e => !e.isTranslated).Any()) { state = screenStates.save; break; }
-            foreach (var entry in entries.Where(e => !e.isTranslated))
+        case screenStates.import:
             {
+                string path = ask(true, "Enter path to a serialized XML to import and merge");
+                if (path.EndsWith(".xml")) imported = importFile(path);
+                else
+                {
+                    wl("Invalid file type. Only XML files are supported for import.");
+                    break;
+                }
+                state = screenStates.merge;
+            }
+            break;
+
+        case screenStates.merge:
+            {
+                var entriesToMerge = imported.Where(e => e.isTranslated);
+                var atFirst = entriesToMerge.Count();
+                int i = 0;
+                {
+                    foreach (var entryToMerge in entriesToMerge)
+                    {
+                        clear();
+                        {
+                            string progress = $"{i}/{atFirst}";
+                            string progressPercent = (i * 100 / atFirst).ToString() + "%";
+                            Console.Write(progress);
+                            Console.Write(new string(' ', (26 - progress.Length - progressPercent.Length)));
+                            wl(progressPercent);
+                            int progressChars = (i * 26) / atFirst;
+                            Console.WriteLine($"{new string('█', progressChars)}{new string('░', 26 - progressChars)}");
+                            wl("");
+                        }
+                        wl($"Path: {entryToMerge._path}");
+                        wl("");
+                        wl($"Original: {entryToMerge.Original}");
+                        wl("");
+                        wl($"Existing translation: {entries.Where(e => e._path == entryToMerge._path).Select(e => e.Translation).FirstOrDefault()}");
+                        wl($"Imported translation: {entryToMerge.Translation}");
+                        wl("");
+                        
+                        string decision = ask(true, $"Which one do you want to keep? [Existing/Imported/EMPTY]");
+                        i++;
+                        switch (decision.ToLower())
+                        {
+                            case "i":
+                                entries.Where(e => e._path == entryToMerge._path).First().Translation = entryToMerge.Translation;
+                                break;
+                            case "empty":
+                                entries.Where(e => e._path == entryToMerge._path).First().Translation = "";
+                                break;
+                            default:
+                                break;
+                        }
+                    }
+                }
+                state = screenStates.translating;
+            }
+            break;
+
+        case screenStates.translating:          
+            //foreach (var entry in entries.Where(e => !e.isTranslated))
+            var entry  = entries.Where(e => !e.isTranslated).ToList()[rnd.Next(0, entries.Where(e => !e.isTranslated).Count())];
+            {
+                {
+                    if (!entries.Where(e => !e.isTranslated).Any()) { state = screenStates.save; break; }
+                    string progress = $"{entries.Where(e => e.isTranslated).Count()}/{entries.Count}";
+                    string progressPercent = (entries.Where(e => e.isTranslated).Count() * 100 / entries.Count).ToString() + "%";
+                    Console.Write(progress);
+                    Console.Write(new string(' ', (26 - progress.Length - progressPercent.Length)));
+                    wl(progressPercent);
+                    int progressChars = (entries.Where(e => e.isTranslated).Count() * 26) / entries.Count;
+                    Console.WriteLine($"{new string('█', progressChars)}{new string('░', 26 - progressChars)}");
+                    wl("");
+
+                }
                 wl($"Path: {entry._path}");
                 wl("");
                 wl($"Original: {entry.Original}");
                 wl("");
+                if (entry.isTranslated)
+                {
+                    wl($"Translation: {entry.Translation}");
+                    wl("");
+                }
                 string translation = ask(true, "Enter translation (or leave empty to skip)");
                 if (translation == "savenquit")
                 {
                     state = screenStates.save;
                     break;
                 }
-                entry.Translation = translation;
+                else if (translation == "import")
+                {
+                    state = screenStates.import;
+                    break;
+                }
+                else if (translation == "exit")
+                {
+                    running = false;
+                    break;
+                }
+                else
+                {
+                    entry.Translation = translation;
+                }
                 clear();
             }
             break;
@@ -61,7 +155,7 @@ while (running)
         case screenStates.quitConfirmation:
 
             break;
-        
+
         case screenStates.save:
             {
                 string path = ask(true, "Enter path to save either a serialized XML or a JSON file");
@@ -71,7 +165,6 @@ while (running)
             break;
     }
 }
-
 
 string ask(bool removeQuotes = false, string ?question = null)
 {
@@ -288,5 +381,7 @@ enum screenStates
     search,
     goTo,
     save,
-    quitConfirmation
+    quitConfirmation,
+    import,
+    merge
 }
