@@ -1,5 +1,6 @@
+using System.ComponentModel;
 using System.Diagnostics;
-using System.Drawing;
+using System.Runtime.InteropServices.Java;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -9,21 +10,73 @@ using System.Xml.Serialization;
 Console.InputEncoding = Encoding.Unicode;
 Console.OutputEncoding = Encoding.Unicode;
 
+
 #region vars
-List<translationEntry> entries = new List<translationEntry>();
-List<translationEntry> imported = new List<translationEntry>();
+List<translationEntry> entries = new();
+IEnumerable<(translationEntry entry, int index)> untranslated()
+{
+    return entries
+        .Select((entry, index) => (entry, index))
+        .Where(x => !x.entry.isTranslated);
+}
+List<translationEntry> imported = new();
 bool running = true;
-screenStates state = screenStates.mainMenu;
 var rnd = new Random();
+int currentEntryIndex = 0;
+string tempBuffer = "";
+screenStates state =screenStates.mainMenu;
+bool redraw = true;
+bool translated()
+{
+    var untranslatedEntries = untranslated().ToList();
+
+    return (untranslatedEntries.Count == 0);
+}
+translationEntry entry()
+{
+    return entries[currentEntryIndex];
+}
 #endregion
 
-wl("scav_translation_tool v0.1");
-wl("--------------------------");
+wl("scav_translation_tool v0.idkitworks");
+wl("-----------------------------------");
 wl("");
 
 while (running)
 {
-    clear();
+    if (redraw)
+    {
+        redraw = false;
+        clear();
+        if (state == screenStates.translating)
+        {
+            wrt("[ESC] Exit, [ENTER] Next, [^R] Random, [^S] Save, [ALT+M] Mark" + Environment.NewLine + (entry().isMarked ? "Entry marked" : "Entry unmarked"), 0, Console.WindowHeight - 2, 0, 3);
+
+            {
+                if (!entries.Where(e => !e.isTranslated).Any()) { setState(screenStates.save); break; }
+                string progress = $"{entries.Where(e => e.isTranslated).Count()}/{entries.Count}";
+                string progressPercent = (entries.Where(e => e.isTranslated).Count() * 100 / entries.Count).ToString() + "%";
+                Console.Write(progress);
+                Console.Write(new string(' ', (26 - progress.Length - progressPercent.Length)));
+                wl(progressPercent);
+                int progressChars = (entries.Where(e => e.isTranslated).Count() * 26) / entries.Count;
+                wl($"{new string('█', progressChars)}{new string('░', 26 - progressChars)}");
+                wl("");
+            }
+
+            wl($"Path: {entry()._path}");
+            wl("");
+            wl($"Original: \"{entry().Original}\"");
+            wl("");
+            if (entry().isTranslated)
+            {
+                wl($"Translation: {entry().Translation}");
+                wl("");
+            }
+            wl("Enter translation (or leave empty to skip)");
+            Console.Write("> ");
+        }
+    }
 
     switch (state)
     {
@@ -42,11 +95,39 @@ while (running)
                         foreach (var entr in entries)
                         {
                             var match = original.Find(x => x._path == entr._path);
-                            if (match != null) entr.Original = match.Original;
+                            if (match != null)
+                            {
+                                if (entr.Original != match.Original)
+                                {
+                                    entr.Translation = entr.Original;
+                                    entr.Original = match.Original;
+                                }
+                            }
                         }
                     }
                 }
-                state = screenStates.translating;
+                else
+                {
+                    wl("Invalid file type.");
+                    wl("Press ENTER to try again...");
+                    Console.ReadLine();
+                    break;
+                }
+
+                {
+                    var untranslatedEntries = untranslated().ToList();
+
+                    if (untranslatedEntries.Count == 0)
+                        setState(screenStates.save);
+                    else
+                    {
+                        currentEntryIndex =
+                            untranslatedEntries.First().index;
+
+                        tempBuffer = "";
+                        setState(screenStates.translating);
+                    }
+                }
             }
             break;
 
@@ -72,10 +153,14 @@ while (running)
                 else
                 {
                     wl("Invalid file type.");
+                    wl("Press ENTER to try again...");
+                    Console.ReadLine();
+                    redraw = true;
                     break;
                 }
-                state = screenStates.merge;
+                setState(screenStates.merge);
             }
+            redraw = true;
             break;
 
         case screenStates.merge:
@@ -120,57 +205,82 @@ while (running)
                         }
                     }
                 }
-                state = screenStates.translating;
+                setState(screenStates.translating);
             }
             break;
 
-        case screenStates.translating:          
-            //foreach (var entry in entries.Where(e => !e.isTranslated))
-            var entry  = entries.Where(e => !e.isTranslated).ToList()[rnd.Next(0, entries.Where(e => !e.isTranslated).Count())];
-            {
-                {
-                    if (!entries.Where(e => !e.isTranslated).Any()) { state = screenStates.save; break; }
-                    string progress = $"{entries.Where(e => e.isTranslated).Count()}/{entries.Count}";
-                    string progressPercent = (entries.Where(e => e.isTranslated).Count() * 100 / entries.Count).ToString() + "%";
-                    Console.Write(progress);
-                    Console.Write(new string(' ', (26 - progress.Length - progressPercent.Length)));
-                    wl(progressPercent);
-                    int progressChars = (entries.Where(e => e.isTranslated).Count() * 26) / entries.Count;
-                    Console.WriteLine($"{new string('█', progressChars)}{new string('░', 26 - progressChars)}");
-                    wl("");
+        case screenStates.translating:
+            var key = Console.ReadKey(true);
 
-                }
-                wl($"Path: {entry._path}");
-                wl("");
-                wl($"Original: {entry.Original}");
-                wl("");
-                if (entry.isTranslated)
-                {
-                    wl($"Translation: {entry.Translation}");
-                    wl("");
-                }
-                string translation = ask(true, "Enter translation (or leave empty to skip)");
-                if (translation == "savenquit")
-                {
-                    state = screenStates.save;
+            switch (key.Key)
+            {
+                case ConsoleKey.Escape:
+                    setState(screenStates.quitConfirmation);
                     break;
-                }
-                else if (translation == "import")
-                {
-                    state = screenStates.import;
+                //case ConsoleKey.F1:
+                //    setState(screenStates.help);
+                //    break;
+                case ConsoleKey.S when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    setState(screenStates.save);
                     break;
-                }
-                else if (translation == "exit")
-                {
-                    running = false;
+                case ConsoleKey.M when key.Modifiers.HasFlag(ConsoleModifiers.Alt):
+                    entry().switchMark();
+                    wrt((entry().isMarked ? "Entry   marked" : "Entry unmarked"), 0, Console.WindowHeight - 1, Console.GetCursorPosition().Left, Console.GetCursorPosition().Top);
                     break;
-                }
-                else
-                {
-                    entry.Translation = translation;
-                }
-                clear();
+                case ConsoleKey.Backspace:
+                    if (tempBuffer.Length > 0)
+                    {
+                        tempBuffer = tempBuffer[..^1];
+                        Console.Write("\b \b");
+                    }
+                    break;
+
+                case ConsoleKey.Enter:
+                    {
+                        entries[currentEntryIndex].Translation = tempBuffer;
+
+                        if (!untranslated().Any())
+                        {
+                            setState(screenStates.save);
+                            break;
+                        }
+
+                        var next = untranslated()
+                            .Where(e => e.index > currentEntryIndex)
+                            .FirstOrDefault();
+
+                        if (next != default) currentEntryIndex = next.index;
+                        else currentEntryIndex = untranslated().First().index;
+
+                        tempBuffer = "";
+
+                        setState(screenStates.translating);
+                    }
+                    break;
+
+                case ConsoleKey.R when key.Modifiers.HasFlag(ConsoleModifiers.Control):
+                    {
+                        var untranslatedEntries = untranslated().ToList();
+                        if (untranslatedEntries.Count == 0)
+                        {
+                            setState(screenStates.save);
+                            break;
+                        }
+                        currentEntryIndex = untranslatedEntries[rnd.Next(untranslatedEntries.Count)].index;
+                        tempBuffer = "";
+                        setState(screenStates.translating);
+                    }
+                    break;
+
+                default:
+                    if (key.KeyChar != '\0')
+                    {
+                        tempBuffer += key.KeyChar;
+                        Console.Write(key.KeyChar);
+                    }
+                    break;
             }
+
             break;
 
         case screenStates.search:
@@ -181,15 +291,60 @@ while (running)
 
             break;
 
-        case screenStates.quitConfirmation:
-
-            break;
-
         case screenStates.save:
             {
-                string path = ask(true, "Enter path to save either a serialized XML or a JSON file");
-                if (path.EndsWith(".xml")) saveToFile(path, entries);
-                else if (path.EndsWith(".json")) exportDataBackToJSON(entries, path);
+                string question = translated()
+                    ? "Everything is translated! Enter path to save either a serialized XML or a JSON file"
+                    : "Enter path to save either a serialized XML or a JSON file";
+
+                string path = ask(true, question);
+                if (path.EndsWith(".xml") || path.EndsWith(".json"))
+                {
+                    if (path.EndsWith(".xml")) saveToFile(path, entries);
+                    else if (path.EndsWith(".json")) exportDataBackToJSON(entries, path);
+
+                    if (translated()) setState(screenStates.quitConfirmation);
+                    else setState(screenStates.translating);
+                }
+                else if (string.IsNullOrEmpty(path))
+                {
+                    setState(screenStates.translating);
+                }
+                else
+                {
+                    wl("Invalid file type.");
+                    wl("Press ENTER to try again...");
+                    Console.ReadLine();
+                }
+            }
+            break;
+
+        case screenStates.quitConfirmation:
+            {
+                string question = translated()
+                    ? "Are you sure you want to quit? [Y/N]"
+                    : "Are you sure you want to quit without saving? [Y/N/SAVE]";
+
+                string decision = ask(true, question);
+
+                if (decision.ToLower() == "n")
+                {
+                    setState(screenStates.translating);
+                }
+                else if (decision.ToLower() == "y" || decision.ToLower() == "save")
+                {
+                    if (decision.ToLower() == "y")
+                    {
+                        running = false;
+                    }
+                    else if (decision.ToLower() == "save")
+                    {
+                        string path = ask(true, "Enter path to save either a serialized XML or a JSON file");
+                        if (path.EndsWith(".xml")) saveToFile(path, entries);
+                        else if (path.EndsWith(".json")) exportDataBackToJSON(entries, path);
+                    }
+                    running = false;
+                }
             }
             break;
     }
@@ -203,10 +358,11 @@ string ask(bool removeQuotes = false, string ?question = null)
     return removeQuotes ? input.Replace("\"", "") : input;
 }
 void wl(string text) { Console.WriteLine(text); }
-void wrt(string text, int x, int y)
+void wrt(string text, int x, int y, int originalX, int originalY)
 {
     goTo(x, y);
     Console.Write(text);
+    goTo(originalX, originalY);
 }
 void goTo(int x, int y)
 {
@@ -224,11 +380,14 @@ void clear()
         clearLine();
     }
     goTo(0, 3);
+
+    redraw = false;
 }
 
-List<translationEntry> parseData(JsonNode? node, int indent = 0, string path = "")
+List<translationEntry> parseData(JsonNode? node, string path = "")
 {
     var parsed = new List<translationEntry>();
+
     if (node == null) return null;
     if (node is JsonObject obj)
     {
@@ -238,7 +397,7 @@ List<translationEntry> parseData(JsonNode? node, int indent = 0, string path = "
                 ? kvp.Key
                 : $"{path}.{kvp.Key}";
 
-            parseData(kvp.Value, indent + 2, newPath);
+            parsed.AddRange(parseData(kvp.Value, newPath));
         }
     }
     else if (node is JsonArray arr)
@@ -249,7 +408,7 @@ List<translationEntry> parseData(JsonNode? node, int indent = 0, string path = "
                 ? $"[{i}]"
                 : $"{path}.[{i}]";
 
-            parseData(arr[i], indent + 2, newPath);
+            parsed.AddRange(parseData(arr[i], newPath));
         }
     }
     else if (node is JsonValue value)
@@ -260,6 +419,7 @@ List<translationEntry> parseData(JsonNode? node, int indent = 0, string path = "
             Original = value.ToString()
         });
     }
+
     return parsed;
 }
 
@@ -391,6 +551,12 @@ List<translationEntry> importFile(string filename)
     return data;
 }
 
+void setState(screenStates newState)
+{
+    state = newState;
+    redraw = true;
+}
+
 public class translationEntry
 {
     public string _path { get; set; }
@@ -403,6 +569,8 @@ public class translationEntry
     public string? Translation { get; set; }
     public bool isTranslated =>
         !string.IsNullOrWhiteSpace(Translation);
+    public bool isMarked { get; set; }
+    public void switchMark() => isMarked = !isMarked;
 }
 
 enum screenStates
